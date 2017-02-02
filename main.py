@@ -4,6 +4,7 @@ import numpy as np
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtGui, QtCore
 import sys
+import time
 
 FORMAT = pyaudio.paInt16
 CHANNELS = 1
@@ -15,6 +16,8 @@ class AudioFFT(object):
     def __init__(self):
         self.x = sf.fftfreq(CHUNK, 1.0/RATE)[:int(CHUNK/2)]
         self.audio = pyaudio.PyAudio()
+        self.preDetect = -1
+        self.lastMeans = []
 
     def start(self, device):
         self.stream = self.audio.open(
@@ -44,8 +47,28 @@ class AudioFFT(object):
     def callback(self, in_data, frame_count, time_info, status):
         result = sf.fft(np.fromstring(in_data, dtype=np.int16))
         self.y = np.abs(result)[:int(CHUNK/2)]
-        if 10000 < np.mean(self.y) and 100000000 < np.var(self.y):
-            print(np.mean(self.y), np.var(self.y))
+        mean = np.mean(self.y)
+        var = np.var(self.y)
+        meansMean = np.mean(self.lastMeans)
+
+        if self.preDetect == -1:
+            if 10.0*meansMean < mean and 10000 < mean and 200000000 < var:
+                self.preDetect = mean
+                self.preDetectTime = time.time()
+                print('preDetect')
+                print(meansMean, mean, var)
+        elif self.preDetectTime + 0.2 < time.time():
+            if mean < self.preDetect:
+                print('Patchin!')
+            else:
+                print('not Patchin!')
+            print(meansMean, mean, var)
+            self.preDetect = -1
+
+        if 10 <= len(self.lastMeans):
+            self.lastMeans.pop(0)
+        self.lastMeans.append(mean)
+
         return (None, pyaudio.paContinue)
 
 class Graph(object):
@@ -78,7 +101,7 @@ if __name__ == '__main__':
     a = AudioFFT()
     for i, device in enumerate(a.getDevices()):
         print(i, device['name'])
-    device = input('input device ID >')
+    device = input('input device ID > ')
     a.start(int(device))
 
     timer = QtCore.QTimer()
