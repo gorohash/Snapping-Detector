@@ -1,23 +1,30 @@
 import pyaudio
 import scipy.fftpack as sf
 import numpy as np
-import pyqtgraph as pg
-from pyqtgraph.Qt import QtGui, QtCore
 import sys
 import time
+import subprocess
 
 FORMAT = pyaudio.paInt16
 CHANNELS = 1
 RATE = 48000
 CHUNK =2**10
 
-class AudioFFT(object):
+AS_NEXT = b'''
+tell application "Keynote"
+    activate
+    show next
+end tell
+'''
+
+class SnappingDetector(object):
 
     def __init__(self):
         self.x = sf.fftfreq(CHUNK, 1.0/RATE)[:int(CHUNK/2)]
         self.audio = pyaudio.PyAudio()
         self.preDetect = -1
-        self.lastMeans = []
+        self.lastMeans = [0]
+        self.keynote = KeynoteControl()
 
     def start(self, device):
         self.stream = self.audio.open(
@@ -28,11 +35,8 @@ class AudioFFT(object):
             input_device_index=device,
             frames_per_buffer=CHUNK,
             stream_callback=self.callback)
-
-        print ("recording...")
+        print ("Starting detection...")
         self.stream.start_stream()
-        self.g = Graph()
-        self.g.setButton(self)
 
     def getDevices(self):
         count = self.audio.get_device_count()
@@ -50,19 +54,16 @@ class AudioFFT(object):
         mean = np.mean(self.y)
         var = np.var(self.y)
         meansMean = np.mean(self.lastMeans)
+        freqMean = np.mean(self.x * self.y) / mean
 
         if self.preDetect == -1:
-            if 10.0*meansMean < mean and 10000 < mean and 200000000 < var:
+            if 8000 < freqMean and freqMean < 12000 and 10.0*meansMean < mean and 10000 < mean and 200000000 < var:
                 self.preDetect = mean
                 self.preDetectTime = time.time()
-                print('preDetect')
-                print(meansMean, mean, var)
         elif self.preDetectTime + 0.2 < time.time():
             if mean < self.preDetect:
                 print('Patchin!')
-            else:
-                print('not Patchin!')
-            print(meansMean, mean, var)
+                self.keynote.next()
             self.preDetect = -1
 
         if 10 <= len(self.lastMeans):
@@ -71,41 +72,22 @@ class AudioFFT(object):
 
         return (None, pyaudio.paContinue)
 
-class Graph(object):
-
+class KeynoteControl(object):
     def __init__(self):
-        self.win=pg.GraphicsWindow()
-        self.win.setWindowTitle("My Graph")
-        self.plt=self.win.addPlot()
-        self.plt.setYRange(0,100000)
-        self.plt.setXRange(0,24000)
-        self.curve=self.plt.plot()
+        return
 
-    def close(self, audio):
-        print("Quitting...")
-        self.audio.stream.stop_stream()
-        self.audio.stream.close()
-        self.audio.audio.terminate()
-        QtGui.QApplication.closeAllWindows()
-
-    def setButton(self, audio):
-        self.audio = audio
-        self.button = QtGui.QPushButton('Close', self.win)
-        self.button.move(self.win.width()/2.5, 0)
-        self.button.clicked.connect(self.close)
-        self.button.show()
-
+    def next(self):
+        osa = subprocess.Popen('osascript', stdin = subprocess.PIPE)
+        osa.stdin.write(AS_NEXT)
+        osa.stdin.close()
 
 if __name__ == '__main__':
-
-    a = AudioFFT()
+    a = SnappingDetector()
     for i, device in enumerate(a.getDevices()):
         print(i, device['name'])
     device = input('input device ID > ')
     a.start(int(device))
 
-    timer = QtCore.QTimer()
-    timer.timeout.connect(a.update)
-    timer.start(10)
-    if (sys.flags.interactive!=1) or not hasattr(QtCore, 'PYQT_VERSION'):
-        QtGui.QApplication.instance().exec_()
+    inputStr = ""
+    while inputStr == "":
+        inputStr = input()
